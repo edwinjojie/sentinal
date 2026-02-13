@@ -1,2 +1,3 @@
 # sentinal
 Sentinel is a distributed, Redis-backed rate limiting and abuse detection service that protects APIs from excessive or malicious traffic using atomic counters, sliding window algorithms, and configurable enforcement policies.
+Sentinal is a pet project of mine through which i aim to find a method to increase the efficiency of token usage in ai models by implementing some self devoloped algorithm hopefully 
