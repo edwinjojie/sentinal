@@ -26,3 +26,20 @@ export interface Limiter {
 export interface Guard {
   allow(key: string): Promise<boolean>
 }
+
+export interface GuardConfig {
+  minuteTokenLimit: number
+  dailyCostLimitUSD: number
+  blockOnViolation?: boolean
+}
+
+export interface LLMRequest {
+  subjectId: string
+  model: string
+  prompt: string
+}
+
+export interface LLMResponse {
+  output: string
+  totalTokens: number
+}

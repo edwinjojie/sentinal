@@ -1,4 +1,4 @@
-import { TokenEstimator } from './types'
+import { TokenEstimator } from '../core/types'
 
 export class SimpleTokenEstimator implements TokenEstimator {
   estimate(input: string): number {
