@@ -1,11 +1,12 @@
 import { GuardConfig, LLMRequest } from './types'
 import { LLMProvider } from '../providers/llmProvider'
-import { checkLimits } from './limiter'
 import {
   incrementMinuteTokens,
-  incrementDailyCost,
+  incrementDailyCostCents,
+  reserveBudget,
 } from '../storage/usageStore'
-import { calculateCost } from './costCalculator'
+import { calculateCost, costToCents } from './costCalculator'
+import { estimateTokens } from '../utils/tokenEstimator'
 
 export class SentinalGuard {
   private provider: LLMProvider
@@ -17,17 +18,39 @@ export class SentinalGuard {
   }
 
   async generate(request: LLMRequest) {
-    const limitCheck = await checkLimits(request.subjectId, this.config)
+    const estimatedTokens = estimateTokens(request.prompt)
+    const estimatedCost = calculateCost(estimatedTokens)
+    const estimatedCostCents = costToCents(estimatedCost)
 
-    if (!limitCheck.allowed && this.config.blockOnViolation) {
-      throw new Error(limitCheck.reason)
+    const minuteLimit = this.config.minuteTokenLimit
+    const dailyLimitCents = costToCents(this.config.dailyCostLimitUSD)
+
+    const reservation = await reserveBudget(
+      request.subjectId,
+      estimatedTokens,
+      minuteLimit,
+      estimatedCostCents,
+      dailyLimitCents,
+    )
+
+    if (!reservation.allowed && this.config.blockOnViolation) {
+      throw new Error(reservation.reason)
     }
 
     const response = await this.provider.generate(request)
-    const cost = calculateCost(response.totalTokens)
+    const actualCost = calculateCost(response.totalTokens)
+    const actualCostCents = costToCents(actualCost)
 
-    await incrementMinuteTokens(request.subjectId, response.totalTokens)
-    await incrementDailyCost(request.subjectId, cost)
+    const deltaTokens = response.totalTokens - estimatedTokens
+    const deltaCostCents = actualCostCents - estimatedCostCents
+
+    if (deltaTokens > 0) {
+      await incrementMinuteTokens(request.subjectId, deltaTokens)
+    }
+
+    if (deltaCostCents > 0) {
+      await incrementDailyCostCents(request.subjectId, deltaCostCents)
+    }
 
     return response
   }
