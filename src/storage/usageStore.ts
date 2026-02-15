@@ -1,31 +1,25 @@
-import type Redis from 'ioredis'
+import { redis } from './redisClient'
 
-export class UsageStore {
-  private prefix: string
-  private client: Redis
-
-  constructor(client: Redis, prefix = 'sentinal') {
-    this.client = client
-    this.prefix = prefix
-  }
-
-  private makeKey(key: string, windowMs: number): string {
-    const bucket = Math.floor(Date.now() / windowMs)
-    return `${this.prefix}:${key}:${bucket}`
-  }
-
-  async increment(key: string, windowMs: number): Promise<number> {
-    const k = this.makeKey(key, windowMs)
-    const count = await this.client.incr(k)
-    await this.client.pexpire(k, windowMs)
-    return count
-  }
-
-  async ttlMs(key: string, windowMs: number): Promise<number> {
-    const k = this.makeKey(key, windowMs)
-    const ttl = await this.client.pttl(k)
-    return ttl < 0 ? 0 : ttl
-  }
+export async function incrementMinuteTokens(subjectId: string, tokens: number) {
+  const key = `sentinal:minute:${subjectId}`
+  await redis.incrby(key, tokens)
+  await redis.expire(key, 60)
 }
 
-export default UsageStore
+export async function getMinuteTokens(subjectId: string) {
+  const key = `sentinal:minute:${subjectId}`
+  const val = await redis.get(key)
+  return parseInt(val || '0')
+}
+
+export async function incrementDailyCost(subjectId: string, cost: number) {
+  const key = `sentinal:daily:${subjectId}`
+  await redis.incrbyfloat(key, cost)
+  await redis.expire(key, 86400)
+}
+
+export async function getDailyCost(subjectId: string) {
+  const key = `sentinal:daily:${subjectId}`
+  const val = await redis.get(key)
+  return parseFloat(val || '0')
+}

@@ -1,23 +1,17 @@
-import { LimitPolicy, Limiter, LimitCheck } from './types'
-import { UsageStore } from '../storage/usageStore'
+import { GuardConfig } from './types'
+import { getMinuteTokens, getDailyCost } from '../storage/usageStore'
 
-export class RedisLimiter implements Limiter {
-  private store: UsageStore
-  private policy: LimitPolicy
+export async function checkLimits(subjectId: string, config: GuardConfig) {
+  const minuteTokens = await getMinuteTokens(subjectId)
+  const dailyCost = await getDailyCost(subjectId)
 
-  constructor(store: UsageStore, policy: LimitPolicy) {
-    this.store = store
-    this.policy = policy
+  if (minuteTokens > config.minuteTokenLimit) {
+    return { allowed: false, reason: 'Minute token limit exceeded' }
   }
 
-  async check(key: string): Promise<LimitCheck> {
-    const k = this.policy.keyPrefix ? `${this.policy.keyPrefix}:${key}` : key
-    const count = await this.store.increment(k, this.policy.windowMs)
-    const allowed = count <= this.policy.max
-    const remaining = allowed ? this.policy.max - count : 0
-    const resetMs = await this.store.ttlMs(k, this.policy.windowMs)
-    return { allowed, remaining, resetMs }
+  if (dailyCost > config.dailyCostLimitUSD) {
+    return { allowed: false, reason: 'Daily cost limit exceeded' }
   }
+
+  return { allowed: true as const }
 }
-
-export default RedisLimiter

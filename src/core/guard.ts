@@ -1,16 +1,34 @@
-import { Guard, Limiter } from './types'
+import { GuardConfig, LLMRequest } from './types'
+import { LLMProvider } from '../providers/llmProvider'
+import { checkLimits } from './limiter'
+import {
+  incrementMinuteTokens,
+  incrementDailyCost,
+} from '../storage/usageStore'
+import { calculateCost } from './costCalculator'
 
-export class BasicGuard implements Guard {
-  private limiter: Limiter
+export class SentinalGuard {
+  private provider: LLMProvider
+  private config: GuardConfig
 
-  constructor(limiter: Limiter) {
-    this.limiter = limiter
+  constructor(provider: LLMProvider, config: GuardConfig) {
+    this.provider = provider
+    this.config = config
   }
 
-  async allow(key: string): Promise<boolean> {
-    const res = await this.limiter.check(key)
-    return res.allowed
+  async generate(request: LLMRequest) {
+    const limitCheck = await checkLimits(request.subjectId, this.config)
+
+    if (!limitCheck.allowed && this.config.blockOnViolation) {
+      throw new Error(limitCheck.reason)
+    }
+
+    const response = await this.provider.generate(request)
+    const cost = calculateCost(response.totalTokens)
+
+    await incrementMinuteTokens(request.subjectId, response.totalTokens)
+    await incrementDailyCost(request.subjectId, cost)
+
+    return response
   }
 }
-
-export default BasicGuard

@@ -1,11 +1,3 @@
-import { TokenEstimator } from '../core/types'
-
-export class SimpleTokenEstimator implements TokenEstimator {
-  estimate(input: string): number {
-    const trimmed = input.trim()
-    if (!trimmed) return 0
-    return Math.ceil(trimmed.split(/\s+/).length)
-  }
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
 }
-
-export default SimpleTokenEstimator
