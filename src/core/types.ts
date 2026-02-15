@@ -11,20 +11,7 @@ export type LimitCheck = {
 }
 
 export interface TokenEstimator {
-  estimate(input: string): number
-}
-
-export interface CostCalculator {
-  calculateTokens(input: string): number
-  calculateCost(tokens: number): number
-}
-
-export interface Limiter {
-  check(key: string): Promise<LimitCheck>
-}
-
-export interface Guard {
-  allow(key: string): Promise<boolean>
+  estimate(text: string): number
 }
 
 export interface GuardConfig {
@@ -42,4 +29,18 @@ export interface LLMRequest {
 export interface LLMResponse {
   output: string
   totalTokens: number
+}
+
+export interface GuardHooksContext {
+  request: LLMRequest
+  config: GuardConfig
+  response?: LLMResponse
+  reason?: string
+  error?: unknown
+}
+
+export interface GuardHooks {
+  onAllowed?(context: GuardHooksContext): void | Promise<void>
+  onBlocked?(context: GuardHooksContext): void | Promise<void>
+  onError?(context: GuardHooksContext): void | Promise<void>
 }

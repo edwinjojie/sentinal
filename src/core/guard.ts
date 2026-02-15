@@ -1,57 +1,85 @@
-import { GuardConfig, LLMRequest } from './types'
-import { LLMProvider } from '../providers/llmProvider'
 import {
-  incrementMinuteTokens,
-  incrementDailyCostCents,
-  reserveBudget,
-} from '../storage/usageStore'
-import { calculateCost, costToCents } from './costCalculator'
-import { estimateTokens } from '../utils/tokenEstimator'
+  GuardConfig,
+  GuardHooks,
+  GuardHooksContext,
+  LLMRequest,
+} from './types'
+import { LLMProvider } from '../providers/llmProvider'
+import { EnforcementEngine } from './enforcementEngine'
+import { simpleEstimator } from '../utils/tokenEstimator'
+import { LimitExceededError } from './errors'
 
 export class SentinalGuard {
   private provider: LLMProvider
   private config: GuardConfig
+  private hooks?: GuardHooks
+  private engine: EnforcementEngine
 
-  constructor(provider: LLMProvider, config: GuardConfig) {
+  constructor(
+    provider: LLMProvider,
+    config: GuardConfig,
+    hooks?: GuardHooks,
+  ) {
+    if (config.minuteTokenLimit <= 0) {
+      throw new Error('Invalid minuteTokenLimit')
+    }
+
+    if (config.dailyCostLimitUSD <= 0) {
+      throw new Error('Invalid dailyCostLimitUSD')
+    }
+
     this.provider = provider
     this.config = config
+    this.hooks = hooks
+    this.engine = new EnforcementEngine({ estimator: simpleEstimator })
   }
 
   async generate(request: LLMRequest) {
-    const estimatedTokens = estimateTokens(request.prompt)
-    const estimatedCost = calculateCost(estimatedTokens)
-    const estimatedCostCents = costToCents(estimatedCost)
-
-    const minuteLimit = this.config.minuteTokenLimit
-    const dailyLimitCents = costToCents(this.config.dailyCostLimitUSD)
-
-    const reservation = await reserveBudget(
-      request.subjectId,
-      estimatedTokens,
-      minuteLimit,
-      estimatedCostCents,
-      dailyLimitCents,
-    )
-
-    if (!reservation.allowed && this.config.blockOnViolation) {
-      throw new Error(reservation.reason)
+    const baseContext: GuardHooksContext = {
+      request,
+      config: this.config,
     }
 
-    const response = await this.provider.generate(request)
-    const actualCost = calculateCost(response.totalTokens)
-    const actualCostCents = costToCents(actualCost)
+    try {
+      const { estimatedTokens, estimatedCostCents } = await this.engine.reserve(
+        request,
+        this.config,
+      )
 
-    const deltaTokens = response.totalTokens - estimatedTokens
-    const deltaCostCents = actualCostCents - estimatedCostCents
+      const response = await this.provider.generate(request)
 
-    if (deltaTokens > 0) {
-      await incrementMinuteTokens(request.subjectId, deltaTokens)
+      await this.engine.commit(
+        request,
+        response,
+        estimatedTokens,
+        estimatedCostCents,
+      )
+
+      if (this.hooks?.onAllowed) {
+        await this.hooks.onAllowed({
+          ...baseContext,
+          response,
+        })
+      }
+
+      return response
+    } catch (err) {
+      if (err instanceof LimitExceededError) {
+        if (this.hooks?.onBlocked) {
+          await this.hooks.onBlocked({
+            ...baseContext,
+            reason: err.reason,
+            error: err,
+          })
+        }
+      } else if (this.hooks?.onError) {
+        await this.hooks.onError({
+          ...baseContext,
+          error: err,
+        })
+      }
+
+      throw err
     }
-
-    if (deltaCostCents > 0) {
-      await incrementDailyCostCents(request.subjectId, deltaCostCents)
-    }
-
-    return response
   }
 }
