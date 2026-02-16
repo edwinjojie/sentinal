@@ -35,54 +35,6 @@ local requested = tonumber(ARGV[1])
 local now = tonumber(ARGV[2])
 local window = tonumber(ARGV[3])
 local limit = tonumber(ARGV[4])
-local member_id = ARGV[5]
-
--- 1. Remove old entries outside the window
-local clearBefore = now - window
-redis.call("ZREMRANGEBYSCORE", key, "-inf", clearBefore)
-
--- 2. Sum current usage in window
-local current_usage = 0
-local range = redis.call("ZRANGE", key, 0, -1)
-for _, score in ipairs(range) do
-    current_usage = current_usage + tonumber(score)
-end
-
--- 3. Check limit
-if current_usage + requested > limit then
-    return -1
-end
-
--- 4. Add new request
--- We store the tokens as the score? No, ZSET scores are for sorting (timestamp).
--- We store tokens in the member? No, members must be unique.
--- Wait. ZSET: Member = ID, Score = Timestamp.
--- But how do we store the *amount* of tokens? 
--- If we just count requests, ZCARD is fine. 
--- But we need token bucket. 
--- WE NEED TO STORE TOKENS IN THE MEMBER OR USE A SECOND HASH.
--- Or, we use the Score for Timestamp, and the Member string contains the token count? 
--- "tokens:unique_id"
--- Then we have to parse the member string in Lua.
--- Let's try that. Member format: "tokens:timestamp:random"
-
--- Lua Split function
--- (Simpler: just use a separator like ":")
-
--- Actually, user suggested: "ZADD timestamp tokens". 
--- Wait. ZADD key score member. 
--- User said: "ZADD timestamp tokens". This implies Member=Tokens, Score=Timestamp.
--- BUT uniqueness! If multiple requests have same token count, they overwrite! 
--- So Member must be unique. 
--- ZADD key timestamp "tokens:nonce" 
-
--- Let's refine the script.
-
-local key = KEYS[1]
-local requested = tonumber(ARGV[1])
-local now = tonumber(ARGV[2])
-local window = tonumber(ARGV[3])
-local limit = tonumber(ARGV[4])
 local member = ARGV[5] -- "tokens:nonce"
 
 -- 1. Remove old
@@ -112,3 +64,63 @@ redis.call("EXPIRE", key, window)
 return limit - (current_usage + requested)
 `
 
+export const RESERVE_UNIFIED = `
+local minuteKey = KEYS[1]
+local dailyKey = KEYS[2]
+
+local now = tonumber(ARGV[1])
+local minuteWindow = tonumber(ARGV[2])
+local minuteLimit = tonumber(ARGV[3])
+local dailyTTL = tonumber(ARGV[4])
+local dailyLimit = tonumber(ARGV[5])
+local tokens = tonumber(ARGV[6])
+local cost = tonumber(ARGV[7])
+local member = ARGV[8] -- "tokens:nonce" for sliding window
+
+-- 1. Check Daily Limit (Fixed Window / Budget Bucket)
+local dailyBudget = redis.call("GET", dailyKey)
+if not dailyBudget then
+    dailyBudget = dailyLimit
+    redis.call("SET", dailyKey, dailyBudget, "EX", dailyTTL)
+else
+    dailyBudget = tonumber(dailyBudget)
+end
+
+if dailyBudget < cost then
+    return {-1, "Daily cost limit exceeded"}
+end
+
+-- 2. Check Minute Limit (Sliding Window)
+-- Remove old entries
+local clearBefore = now - minuteWindow
+redis.call("ZREMRANGEBYSCORE", minuteKey, "-inf", clearBefore)
+
+-- Sum current usage
+local currentMinuteUsage = 0
+local range = redis.call("ZRANGE", minuteKey, 0, -1)
+for _, item in ipairs(range) do
+    local t = tonumber(string.match(item, "^(%-?%d+):"))
+    if t then
+        currentMinuteUsage = currentMinuteUsage + t
+    end
+end
+
+if currentMinuteUsage + tokens > minuteLimit then
+    return {-1, "Minute token limit exceeded"}
+end
+
+-- 3. Commit Reservation
+-- Decrement Daily Budget
+local newDaily = redis.call("DECRBY", dailyKey, cost)
+
+-- Add to Minute Sliding Window
+redis.call("ZADD", minuteKey, now, member)
+redis.call("EXPIRE", minuteKey, minuteWindow)
+
+-- Return remaining budgets? 
+-- Minute remaining is dynamic (limit - usage - requested)
+-- Daily is newDaily.
+local minuteRemaining = minuteLimit - (currentMinuteUsage + tokens)
+
+return {1, minuteRemaining, newDaily}
+`
