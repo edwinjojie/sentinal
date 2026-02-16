@@ -1,15 +1,18 @@
 import { GuardConfig } from './types'
-import { getUsage } from '../storage/usageStore'
+import { getRemainingBudget } from '../storage/usageStore'
 
 export async function checkLimits(subjectId: string, config: GuardConfig) {
-  const usage = await getUsage(subjectId)
-  const dailyLimitCents = Math.round(config.dailyCostLimitUSD * 100)
+  const { minuteRemaining, dailyRemaining } = await getRemainingBudget(subjectId)
 
-  if (usage.minuteTokens > config.minuteTokenLimit) {
+  // If budget exists and is exhausted (<= 0), limit is exceeded.
+  // Note: reserveBudget allows if current >= requested.
+  // If we just want to check "is blocked?", then if remaining <= 0 we are blocked for any request > 0.
+
+  if (minuteRemaining !== null && minuteRemaining <= 0) {
     return { allowed: false, reason: 'Minute token limit exceeded' }
   }
 
-  if (usage.dailyCostCents > dailyLimitCents) {
+  if (dailyRemaining !== null && dailyRemaining <= 0) {
     return { allowed: false, reason: 'Daily cost limit exceeded' }
   }
 

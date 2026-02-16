@@ -1,8 +1,7 @@
 import { GuardConfig, LLMRequest, LLMResponse, TokenEstimator } from './types'
 import {
-  incrementMinuteTokens,
-  incrementDailyCostCents,
   reserveBudget,
+  adjustBudget,
 } from '../storage/usageStore'
 import { calculateCost, costToCents } from './costCalculator'
 import { LimitExceededError } from './errors'
@@ -63,16 +62,10 @@ export class EnforcementEngine {
     const actualCost = calculateCost(response.totalTokens)
     const actualCostCents = costToCents(actualCost)
 
-    const deltaTokens = response.totalTokens - estimatedTokens
-    const deltaCostCents = actualCostCents - estimatedCostCents
+    const deltaTokens = estimatedTokens - response.totalTokens
+    const deltaCostCents = estimatedCostCents - actualCostCents
 
-    if (deltaTokens > 0) {
-      await incrementMinuteTokens(request.subjectId, deltaTokens)
-    }
-
-    if (deltaCostCents > 0) {
-      await incrementDailyCostCents(request.subjectId, deltaCostCents)
-    }
+    await adjustBudget(request.subjectId, deltaTokens, deltaCostCents)
   }
 }
 
