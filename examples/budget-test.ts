@@ -7,7 +7,7 @@ async function run() {
     const DAILY_LIMIT_CENTS = 500 // $5.00
 
     console.log('Clearing keys...')
-    await redis.del(`sentinal:budget:minute:${subjectId}`)
+    await redis.del(`sentinal:sliding:minute:${subjectId}`)
     await redis.del(`sentinal:budget:daily:${subjectId}`)
 
     console.log('--- Test 1: Reserve 50 tokens (Limit 100) ---')
