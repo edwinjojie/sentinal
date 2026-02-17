@@ -4,11 +4,13 @@ import {
   adjustBudget,
 } from '../storage/usageStore'
 import { calculateCost, costToCents } from './costCalculator'
-import { LimitExceededError } from './errors'
-
-export type EnforcementReservationResult =
-  | { allowed: true }
-  | { allowed: false; reason: string }
+// LimitExceededError removed
+export interface EnforcementResult {
+  allowed: boolean
+  reason?: string
+  estimatedTokens: number
+  estimatedCostCents: number
+}
 
 export interface EnforcementEngineOptions {
   estimator: TokenEstimator
@@ -24,10 +26,7 @@ export class EnforcementEngine {
   async reserve(
     request: LLMRequest,
     config: GuardConfig,
-  ): Promise<{
-    estimatedTokens: number
-    estimatedCostCents: number
-  }> {
+  ): Promise<EnforcementResult> {
     const estimatedTokens = this.estimator.estimate(request.prompt)
     const estimatedCost = calculateCost(estimatedTokens)
     const estimatedCostCents = costToCents(estimatedCost)
@@ -43,11 +42,17 @@ export class EnforcementEngine {
       dailyLimitCents,
     )
 
-    if (!reservation.allowed && config.blockOnViolation) {
-      throw new LimitExceededError(reservation.reason)
+    if (!reservation.allowed) {
+      return {
+        allowed: false,
+        reason: reservation.reason,
+        estimatedTokens,
+        estimatedCostCents,
+      }
     }
 
     return {
+      allowed: true,
       estimatedTokens,
       estimatedCostCents,
     }

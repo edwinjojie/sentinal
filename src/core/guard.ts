@@ -41,18 +41,42 @@ export class SentinalGuard {
     }
 
     try {
-      const { estimatedTokens, estimatedCostCents } = await this.engine.reserve(
+      const result = await this.engine.reserve(
         request,
         this.config,
       )
+
+      let reservedTokens = 0
+      let reservedCostCents = 0
+
+      if (!result.allowed && this.config.blockOnViolation) {
+        const error = new LimitExceededError(result.reason || 'Limit exceeded')
+
+        if (this.hooks?.onBlocked) {
+          await this.hooks.onBlocked({
+            ...baseContext,
+            reason: result.reason,
+            error,
+          })
+        }
+
+        throw error
+      }
+
+      // If allowed, we reserved the estimated amount.
+      // If not allowed (but proceeding due to !blockOnViolation), we reserved 0.
+      if (result.allowed) {
+        reservedTokens = result.estimatedTokens
+        reservedCostCents = result.estimatedCostCents
+      }
 
       const response = await this.provider.generate(request)
 
       await this.engine.commit(
         request,
         response,
-        estimatedTokens,
-        estimatedCostCents,
+        reservedTokens,
+        reservedCostCents,
       )
 
       if (this.hooks?.onAllowed) {
@@ -65,14 +89,12 @@ export class SentinalGuard {
       return response
     } catch (err) {
       if (err instanceof LimitExceededError) {
-        if (this.hooks?.onBlocked) {
-          await this.hooks.onBlocked({
-            ...baseContext,
-            reason: err.reason,
-            error: err,
-          })
-        }
-      } else if (this.hooks?.onError) {
+        // Already handled explicitly above if expected. 
+        // But if for some reason it bubbles up (shouldn't), rethrow.
+        throw err
+      }
+
+      if (this.hooks?.onError) {
         await this.hooks.onError({
           ...baseContext,
           error: err,
