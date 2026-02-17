@@ -4,17 +4,17 @@ import { RESERVE_BUDGET, RESERVE_SLIDING_WINDOW, RESERVE_UNIFIED } from './scrip
 const MINUTE_TTL_SECONDS = 60
 const DAILY_TTL_SECONDS = 86400
 
-function minuteKey(subjectId: string): string {
-  return `sentinal:sliding:minute:${subjectId}`
+function minuteKey(subjectId: string, model: string): string {
+  return `sentinal:${model}:${subjectId}:minute`
 }
 
-function dailyKey(subjectId: string): string {
-  return `sentinal:budget:daily:${subjectId}`
+function dailyKey(subjectId: string, model: string): string {
+  return `sentinal:${model}:${subjectId}:daily_budget`
 }
 
-export async function getRemainingBudget(subjectId: string) {
-  const mKey = minuteKey(subjectId)
-  const dKey = dailyKey(subjectId)
+export async function getRemainingBudget(subjectId: string, model: string) {
+  const mKey = minuteKey(subjectId, model)
+  const dKey = dailyKey(subjectId, model)
 
   const pipeline = redis.pipeline()
   pipeline.get(mKey)
@@ -48,11 +48,12 @@ export async function getRemainingBudget(subjectId: string) {
 
 export async function adjustBudget(
   subjectId: string,
+  model: string,
   tokenDelta: number,
   costCentsDelta: number,
 ) {
-  const mKey = minuteKey(subjectId)
-  const dKey = dailyKey(subjectId)
+  const mKey = minuteKey(subjectId, model)
+  const dKey = dailyKey(subjectId, model)
 
   // tokenDelta is (estimated - actual). 
   // If positive, we reserved too much, so we add back: INCRBY tokenDelta
@@ -127,20 +128,22 @@ const localCache = new Map<string, LocalCacheEntry>()
 
 export async function reserveBudget(
   subjectId: string,
+  model: string,
   tokens: number,
   minuteLimit: number,
   costCents: number,
   dailyLimitCents: number,
 ) {
-  const mKey = minuteKey(subjectId)
-  const dKey = dailyKey(subjectId)
+  const mKey = minuteKey(subjectId, model)
+  const dKey = dailyKey(subjectId, model)
   const now = Date.now()
 
   // --- 1. Micro-Cache (Read-Through / Reservation) ---
-  let entry = localCache.get(subjectId)
+  const cacheKey = `${model}:${subjectId}`
+  let entry = localCache.get(cacheKey)
   if (!entry) {
     entry = { availableTokens: 0, lastSync: 0 }
-    localCache.set(subjectId, entry)
+    localCache.set(cacheKey, entry)
   }
 
   // If we have enough reserved tokens locally, consume them and skip Redis

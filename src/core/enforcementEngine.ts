@@ -27,7 +27,7 @@ export class EnforcementEngine {
     request: LLMRequest,
     config: GuardConfig,
   ): Promise<EnforcementResult> {
-    const estimatedTokens = this.estimator.estimate(request.prompt)
+    const estimatedTokens = this.estimator.estimate(request.prompt, request.model)
     const estimatedCost = calculateCost(estimatedTokens)
     const estimatedCostCents = costToCents(estimatedCost)
 
@@ -36,6 +36,7 @@ export class EnforcementEngine {
 
     const reservation = await reserveBudget(
       request.subjectId,
+      request.model,
       estimatedTokens,
       minuteLimit,
       estimatedCostCents,
@@ -70,7 +71,11 @@ export class EnforcementEngine {
     const deltaTokens = estimatedTokens - response.totalTokens
     const deltaCostCents = estimatedCostCents - actualCostCents
 
-    await adjustBudget(request.subjectId, deltaTokens, deltaCostCents)
+    await adjustBudget(request.subjectId, request.model, deltaTokens, deltaCostCents)
+
+    if (this.estimator.recordActual) {
+      this.estimator.recordActual(request.prompt, response.totalTokens, request.model)
+    }
   }
 }
 

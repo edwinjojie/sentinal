@@ -1,8 +1,8 @@
 import { GuardConfig } from './types'
 import { getRemainingBudget } from '../storage/usageStore'
 
-export async function checkLimits(subjectId: string, config: GuardConfig) {
-  const { minuteRemaining, dailyRemaining } = await getRemainingBudget(subjectId)
+export async function checkLimits(subjectId: string, model: string, config: GuardConfig) {
+  const { minuteRemaining, dailyRemaining } = await getRemainingBudget(subjectId, model)
 
   // If budget exists and is exhausted (<= 0), limit is exceeded.
   // Note: reserveBudget allows if current >= requested.

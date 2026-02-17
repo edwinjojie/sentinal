@@ -11,7 +11,8 @@ export type LimitCheck = {
 }
 
 export interface TokenEstimator {
-  estimate(text: string): number
+  estimate(text: string, model?: string): number
+  recordActual?(prompt: string, actualTokens: number, model?: string): void
 }
 
 export interface GuardConfig {
