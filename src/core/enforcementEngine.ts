@@ -1,15 +1,15 @@
 import { GuardConfig, LLMRequest, LLMResponse, TokenEstimator } from './types'
-import {
-  reserveBudget,
-  adjustBudget,
-} from '../storage/usageStore'
+import { reserveBudget, adjustBudget } from '../storage/usageStore'
 import { calculateCost, costToCents } from './costCalculator'
-// LimitExceededError removed
+
 export interface EnforcementResult {
   allowed: boolean
   reason?: string
   estimatedTokens: number
   estimatedCostCents: number
+  minuteTokens?: number | null
+  rollingAvgTokens?: number | null
+  velocitySpike?: boolean
 }
 
 export interface EnforcementEngineOptions {
@@ -56,6 +56,9 @@ export class EnforcementEngine {
       allowed: true,
       estimatedTokens,
       estimatedCostCents,
+      minuteTokens: reservation.minuteTokens ?? null,
+      rollingAvgTokens: reservation.rollingAvgTokens ?? null,
+      velocitySpike: reservation.velocitySpike ?? false,
     }
   }
 
@@ -78,4 +81,3 @@ export class EnforcementEngine {
     }
   }
 }
-

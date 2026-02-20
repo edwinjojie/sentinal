@@ -122,5 +122,6 @@ redis.call("EXPIRE", minuteKey, minuteWindow)
 -- Daily is newDaily.
 local minuteRemaining = minuteLimit - (currentMinuteUsage + tokens)
 
-return {1, minuteRemaining, newDaily}
+return {1, minuteRemaining, newDaily, currentMinuteUsage + tokens}
+`
 `

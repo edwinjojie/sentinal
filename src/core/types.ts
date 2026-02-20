@@ -38,6 +38,9 @@ export interface GuardHooksContext {
   response?: LLMResponse
   reason?: string
   error?: unknown
+  minuteTokens?: number | null
+  rollingAvgTokens?: number | null
+  velocitySpike?: boolean
 }
 
 export interface GuardHooks {

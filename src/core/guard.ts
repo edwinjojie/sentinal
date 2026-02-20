@@ -41,10 +41,7 @@ export class SentinalGuard {
     }
 
     try {
-      const result = await this.engine.reserve(
-        request,
-        this.config,
-      )
+      const result = await this.engine.reserve(request, this.config)
 
       let reservedTokens = 0
       let reservedCostCents = 0
@@ -82,6 +79,9 @@ export class SentinalGuard {
       if (this.hooks?.onAllowed) {
         await this.hooks.onAllowed({
           ...baseContext,
+          minuteTokens: result.minuteTokens ?? null,
+          rollingAvgTokens: result.rollingAvgTokens ?? null,
+          velocitySpike: result.velocitySpike ?? false,
           response,
         })
       }
