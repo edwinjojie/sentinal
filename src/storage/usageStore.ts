@@ -6,6 +6,8 @@ import {
   CHECK_PROMPT_SIMILARITY,
   CHECK_DAILY_SPEND_SPIKE,
   RECORD_DAILY_SPEND,
+  INCREMENT_ABUSE_SCORE,
+  INCREMENT_EXHAUSTION_COUNT,
 } from './scripts'
 
 const MINUTE_TTL_SECONDS = 60
@@ -265,3 +267,40 @@ export async function recordDailySpend(
   )
 }
 
+export async function incrementAbuseScore(
+  subjectId: string,
+  model: string,
+  scoreDelta: number,
+) {
+  if (scoreDelta <= 0) return 0
+
+  const key = `sentinal:${model}:${subjectId}:abuse_score`
+  const ttl = 86400 // 24 hours
+
+  const newScore = await redis.eval(
+    INCREMENT_ABUSE_SCORE,
+    1,
+    key,
+    scoreDelta,
+    ttl,
+  )
+
+  return newScore as number
+}
+
+export async function incrementExhaustionCount(
+  subjectId: string,
+  model: string,
+) {
+  const key = `sentinal:${model}:${subjectId}:exhaustion_count`
+  const ttl = 3600 // 1 hour window for repeated exhaustion checks
+
+  const newCount = await redis.eval(
+    INCREMENT_EXHAUSTION_COUNT,
+    1,
+    key,
+    ttl,
+  )
+
+  return newCount as number
+}

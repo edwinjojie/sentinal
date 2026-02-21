@@ -15,10 +15,26 @@ export interface TokenEstimator {
   recordActual?(prompt: string, actualTokens: number, model?: string): void
 }
 
+export interface AbuseScoreWeights {
+  velocitySpike?: number
+  promptRepetition?: number
+  spendSpike?: number
+  budgetExhaustion?: number
+}
+
+export interface AbuseScoreThresholds {
+  softThrottle: number
+  hardBlock: number
+  throttleDelayMs: number
+  exhaustionTriggerCount?: number
+}
+
 export interface AbuseDetectionConfig {
   promptSimilarityWindowMs?: number
   promptSimilarityThreshold?: number
   spendSpikeMultiplier?: number
+  scoreWeights?: AbuseScoreWeights
+  scoreThresholds?: AbuseScoreThresholds
 }
 
 export interface GuardConfig {
@@ -49,6 +65,8 @@ export interface GuardHooksContext {
   rollingAvgTokens?: number | null
   velocitySpike?: boolean
   abuseFlags?: string[]
+  abuseScore?: number
+  softThrottled?: boolean
 }
 
 export interface GuardHooks {

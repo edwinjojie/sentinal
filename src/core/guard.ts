@@ -9,6 +9,8 @@ import { EnforcementEngine } from './enforcementEngine'
 import { simpleEstimator } from '../utils/tokenEstimator'
 import { LimitExceededError } from './errors'
 
+const delay = (ms: number) => new Promise((res) => setTimeout(res, ms))
+
 export class SentinalGuard {
   private provider: LLMProvider
   private config: GuardConfig
@@ -55,6 +57,8 @@ export class SentinalGuard {
             reason: result.reason,
             error,
             abuseFlags: result.abuseFlags,
+            abuseScore: result.abuseScore,
+            softThrottled: result.softThrottled,
           })
         }
 
@@ -66,6 +70,11 @@ export class SentinalGuard {
       if (result.allowed) {
         reservedTokens = result.estimatedTokens
         reservedCostCents = result.estimatedCostCents
+
+        if (result.softThrottled && this.config.abuseDetection?.scoreThresholds) {
+          const sleepMs = this.config.abuseDetection.scoreThresholds.throttleDelayMs || 1000
+          await delay(sleepMs)
+        }
       }
 
       const response = await this.provider.generate(request)
@@ -84,6 +93,8 @@ export class SentinalGuard {
           rollingAvgTokens: result.rollingAvgTokens ?? null,
           velocitySpike: result.velocitySpike ?? false,
           abuseFlags: result.abuseFlags,
+          abuseScore: result.abuseScore,
+          softThrottled: result.softThrottled,
           response,
         })
       }

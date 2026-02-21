@@ -5,6 +5,8 @@ import {
   checkPromptSimilarity,
   checkDailySpendSpike,
   recordDailySpend,
+  incrementAbuseScore,
+  incrementExhaustionCount,
 } from '../storage/usageStore'
 import { hashPrompt } from '../utils/promptHash'
 import { calculateCost, costToCents } from './costCalculator'
@@ -18,6 +20,8 @@ export interface EnforcementResult {
   rollingAvgTokens?: number | null
   velocitySpike?: boolean
   abuseFlags?: string[]
+  abuseScore?: number
+  softThrottled?: boolean
 }
 
 export interface EnforcementEngineOptions {
@@ -84,6 +88,58 @@ export class EnforcementEngine {
       dailyLimitCents,
     )
 
+    if (reservation.velocitySpike) {
+      abuseFlags.push('VELOCITY_SPIKE')
+    }
+
+    // Check for near budget exhaustion (< 10% remaining)
+    if (
+      reservation.remainingTokens !== undefined &&
+      reservation.remainingTokens !== null &&
+      reservation.remainingTokens < minuteLimit * 0.1
+    ) {
+      const exhaustionCount = await incrementExhaustionCount(request.subjectId, request.model)
+
+      const triggerCount = config.abuseDetection?.scoreThresholds ?
+        (config.abuseDetection.scoreThresholds as any).exhaustionTriggerCount || 3 : 3;
+
+      if (exhaustionCount >= triggerCount) {
+        abuseFlags.push('BUDGET_EXHAUSTION')
+      }
+    }
+
+    let currentAbuseScore = 0
+    let softThrottled = false
+
+    if (config.abuseDetection?.scoreWeights && abuseFlags.length > 0) {
+      let scoreDelta = 0
+      const weights = config.abuseDetection.scoreWeights
+
+      if (abuseFlags.includes('PROMPT_ENUMERATION')) scoreDelta += weights.promptRepetition || 0
+      if (abuseFlags.includes('SPEND_SPIKE')) scoreDelta += weights.spendSpike || 0
+      if (abuseFlags.includes('VELOCITY_SPIKE')) scoreDelta += weights.velocitySpike || 0
+      if (abuseFlags.includes('BUDGET_EXHAUSTION')) scoreDelta += weights.budgetExhaustion || 0
+
+      if (scoreDelta > 0) {
+        currentAbuseScore = await incrementAbuseScore(request.subjectId, request.model, scoreDelta)
+      }
+    }
+
+    const { scoreThresholds } = config.abuseDetection || {}
+
+    // 1. Hard block if it exceeds the hardBlock threshold
+    if (scoreThresholds && currentAbuseScore >= scoreThresholds.hardBlock) {
+      return {
+        allowed: false,
+        reason: `Abuse score ${currentAbuseScore} exceeds hard block threshold`,
+        estimatedTokens,
+        estimatedCostCents,
+        abuseFlags,
+        abuseScore: currentAbuseScore,
+      }
+    }
+
+    // 2. Original reservation block
     if (!reservation.allowed) {
       return {
         allowed: false,
@@ -91,11 +147,12 @@ export class EnforcementEngine {
         estimatedTokens,
         estimatedCostCents,
         abuseFlags,
+        abuseScore: currentAbuseScore,
       }
     }
 
-    // Also block if we have abuse flags and blockOnViolation is set
-    if (abuseFlags.length > 0 && config.blockOnViolation) {
+    // 3. Fallback to old blockOnViolation if thresholds aren't defined but flags exist
+    if (!scoreThresholds && abuseFlags.length > 0 && config.blockOnViolation) {
       return {
         allowed: false,
         reason: `Abuse detected: ${abuseFlags.join(', ')}`,
@@ -103,6 +160,11 @@ export class EnforcementEngine {
         estimatedCostCents,
         abuseFlags,
       }
+    }
+
+    // 4. Soft throttle check
+    if (scoreThresholds && currentAbuseScore >= scoreThresholds.softThrottle) {
+      softThrottled = true
     }
 
     return {
@@ -113,6 +175,8 @@ export class EnforcementEngine {
       rollingAvgTokens: reservation.rollingAvgTokens ?? null,
       velocitySpike: reservation.velocitySpike ?? false,
       abuseFlags,
+      abuseScore: currentAbuseScore,
+      softThrottled,
     }
   }
 

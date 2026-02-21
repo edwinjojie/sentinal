@@ -203,3 +203,31 @@ redis.call("SET", todayKey, todayCost, "EX", 172800)
 
 return 1
 `
+
+export const INCREMENT_ABUSE_SCORE = `
+local key = KEYS[1]
+local delta = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+
+local current = tonumber(redis.call("GET", key) or "0")
+local newScore = current + delta
+
+redis.call("SET", key, newScore, "EX", ttl)
+return newScore
+`
+
+export const INCREMENT_EXHAUSTION_COUNT = `
+local key = KEYS[1]
+local ttl = tonumber(ARGV[1])
+
+local current = tonumber(redis.call("GET", key) or "0")
+local newCount = current + 1
+
+if current == 0 then
+    redis.call("SET", key, newCount, "EX", ttl)
+else
+    redis.call("INCR", key)
+end
+
+return newCount
+`
