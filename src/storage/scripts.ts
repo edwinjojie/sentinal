@@ -124,4 +124,82 @@ local minuteRemaining = minuteLimit - (currentMinuteUsage + tokens)
 
 return {1, minuteRemaining, newDaily, currentMinuteUsage + tokens}
 `
+
+export const CHECK_PROMPT_SIMILARITY = `
+local key = KEYS[1]
+local hash = ARGV[1]
+local now = tonumber(ARGV[2])
+local window = tonumber(ARGV[3])
+local threshold = tonumber(ARGV[4])
+
+-- 1. Remove old entries
+local clearBefore = now - window
+redis.call("ZREMRANGEBYSCORE", key, "-inf", clearBefore)
+
+-- 2. Add current hash
+local member = hash .. ":" .. tostring(now)
+redis.call("ZADD", key, now, member)
+redis.call("EXPIRE", key, window)
+
+-- 3. Count occurrences of this specific hash in the current window
+local count = 0
+local range = redis.call("ZRANGE", key, 0, -1)
+for _, item in ipairs(range) do
+    if string.match(item, "^" .. hash .. ":") then
+        count = count + 1
+    end
+end
+
+if count > threshold then
+    return 1
+end
+
+return 0
+`
+
+export const CHECK_DAILY_SPEND_SPIKE = `
+local todayKey = KEYS[1]
+local emaKey = KEYS[2]
+
+local multiplier = tonumber(ARGV[1])
+local estimatedCostCents = tonumber(ARGV[2])
+
+local todayCost = tonumber(redis.call("GET", todayKey) or "0")
+local emaCost = tonumber(redis.call("GET", emaKey) or "0")
+
+if emaCost > 0 and (todayCost + estimatedCostCents) > multiplier * emaCost then
+    return 1
+end
+return 0
+`
+
+export const RECORD_DAILY_SPEND = `
+local todayKey = KEYS[1]
+local emaKey = KEYS[2]
+local lastActiveDateKey = KEYS[3]
+
+local costCents = tonumber(ARGV[1])
+local todayString = ARGV[2]
+local alpha = 0.14
+
+local lastActiveDate = redis.call("GET", lastActiveDateKey)
+local todayCost = tonumber(redis.call("GET", todayKey) or "0")
+local emaCost = tonumber(redis.call("GET", emaKey) or "0")
+
+if lastActiveDate and lastActiveDate ~= todayString then
+    if emaCost == 0 then
+        emaCost = todayCost
+    else
+        emaCost = math.floor((alpha * todayCost) + ((1 - alpha) * emaCost))
+    end
+    redis.call("SET", emaKey, emaCost)
+    todayCost = 0
+end
+
+redis.call("SET", lastActiveDateKey, todayString)
+
+todayCost = todayCost + costCents
+redis.call("SET", todayKey, todayCost, "EX", 172800)
+
+return 1
 `

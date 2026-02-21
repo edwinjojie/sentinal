@@ -15,10 +15,17 @@ export interface TokenEstimator {
   recordActual?(prompt: string, actualTokens: number, model?: string): void
 }
 
+export interface AbuseDetectionConfig {
+  promptSimilarityWindowMs?: number
+  promptSimilarityThreshold?: number
+  spendSpikeMultiplier?: number
+}
+
 export interface GuardConfig {
   minuteTokenLimit: number
   dailyCostLimitUSD: number
   blockOnViolation?: boolean
+  abuseDetection?: AbuseDetectionConfig
 }
 
 export interface LLMRequest {
@@ -41,6 +48,7 @@ export interface GuardHooksContext {
   minuteTokens?: number | null
   rollingAvgTokens?: number | null
   velocitySpike?: boolean
+  abuseFlags?: string[]
 }
 
 export interface GuardHooks {

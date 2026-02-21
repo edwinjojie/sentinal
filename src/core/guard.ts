@@ -54,6 +54,7 @@ export class SentinalGuard {
             ...baseContext,
             reason: result.reason,
             error,
+            abuseFlags: result.abuseFlags,
           })
         }
 
@@ -82,6 +83,7 @@ export class SentinalGuard {
           minuteTokens: result.minuteTokens ?? null,
           rollingAvgTokens: result.rollingAvgTokens ?? null,
           velocitySpike: result.velocitySpike ?? false,
+          abuseFlags: result.abuseFlags,
           response,
         })
       }

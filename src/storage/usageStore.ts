@@ -1,5 +1,12 @@
 import { redis } from './redisClient'
-import { RESERVE_BUDGET, RESERVE_SLIDING_WINDOW, RESERVE_UNIFIED } from './scripts'
+import {
+  RESERVE_BUDGET,
+  RESERVE_SLIDING_WINDOW,
+  RESERVE_UNIFIED,
+  CHECK_PROMPT_SIMILARITY,
+  CHECK_DAILY_SPEND_SPIKE,
+  RECORD_DAILY_SPEND,
+} from './scripts'
 
 const MINUTE_TTL_SECONDS = 60
 const DAILY_TTL_SECONDS = 86400
@@ -91,7 +98,7 @@ async function updateVelocity(
   const baseline = oldAvg || currentMinuteTokens
   const newAvg = Math.round(
     VELOCITY_ALPHA * currentMinuteTokens +
-      (1 - VELOCITY_ALPHA) * baseline,
+    (1 - VELOCITY_ALPHA) * baseline,
   )
 
   await redis.set(
@@ -189,3 +196,72 @@ export async function reserveBudget(
     velocitySpike: velocity.velocitySpike,
   }
 }
+
+export async function checkPromptSimilarity(
+  subjectId: string,
+  model: string,
+  promptHash: string,
+  windowMs: number,
+  threshold: number,
+) {
+  const key = `sentinal:${model}:${subjectId}:prompt_hashes`
+  const now = Date.now()
+
+  const result = await redis.eval(
+    CHECK_PROMPT_SIMILARITY,
+    1,
+    key,
+    promptHash,
+    now,
+    windowMs,
+    threshold,
+  )
+
+  return result === 1
+}
+
+export async function checkDailySpendSpike(
+  subjectId: string,
+  model: string,
+  estimatedCostCents: number,
+  multiplier: number,
+) {
+  const todayString = new Date().toISOString().split('T')[0]
+  const todayKey = `sentinal:${model}:${subjectId}:spend:${todayString}`
+  const emaKey = `sentinal:${model}:${subjectId}:ema_spend`
+
+  const result = await redis.eval(
+    CHECK_DAILY_SPEND_SPIKE,
+    2,
+    todayKey,
+    emaKey,
+    multiplier,
+    estimatedCostCents,
+  )
+
+  return result === 1
+}
+
+export async function recordDailySpend(
+  subjectId: string,
+  model: string,
+  costCents: number,
+) {
+  if (costCents === 0) return
+
+  const todayString = new Date().toISOString().split('T')[0]
+  const todayKey = `sentinal:${model}:${subjectId}:spend:${todayString}`
+  const emaKey = `sentinal:${model}:${subjectId}:ema_spend`
+  const lastActiveDateKey = `sentinal:${model}:${subjectId}:last_active_date`
+
+  await redis.eval(
+    RECORD_DAILY_SPEND,
+    3,
+    todayKey,
+    emaKey,
+    lastActiveDateKey,
+    costCents,
+    todayString,
+  )
+}
+

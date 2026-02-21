@@ -1,5 +1,12 @@
 import { GuardConfig, LLMRequest, LLMResponse, TokenEstimator } from './types'
-import { reserveBudget, adjustBudget } from '../storage/usageStore'
+import {
+  reserveBudget,
+  adjustBudget,
+  checkPromptSimilarity,
+  checkDailySpendSpike,
+  recordDailySpend,
+} from '../storage/usageStore'
+import { hashPrompt } from '../utils/promptHash'
 import { calculateCost, costToCents } from './costCalculator'
 
 export interface EnforcementResult {
@@ -10,6 +17,7 @@ export interface EnforcementResult {
   minuteTokens?: number | null
   rollingAvgTokens?: number | null
   velocitySpike?: boolean
+  abuseFlags?: string[]
 }
 
 export interface EnforcementEngineOptions {
@@ -34,6 +42,39 @@ export class EnforcementEngine {
     const minuteLimit = config.minuteTokenLimit
     const dailyLimitCents = costToCents(config.dailyCostLimitUSD)
 
+    const abuseFlags: string[] = []
+
+    if (config.abuseDetection) {
+      if (
+        config.abuseDetection.promptSimilarityWindowMs &&
+        config.abuseDetection.promptSimilarityThreshold
+      ) {
+        const hash = hashPrompt(request.prompt)
+        const isSimilar = await checkPromptSimilarity(
+          request.subjectId,
+          request.model,
+          hash,
+          config.abuseDetection.promptSimilarityWindowMs,
+          config.abuseDetection.promptSimilarityThreshold,
+        )
+        if (isSimilar) {
+          abuseFlags.push('PROMPT_ENUMERATION')
+        }
+      }
+
+      if (config.abuseDetection.spendSpikeMultiplier) {
+        const isSpike = await checkDailySpendSpike(
+          request.subjectId,
+          request.model,
+          estimatedCostCents,
+          config.abuseDetection.spendSpikeMultiplier,
+        )
+        if (isSpike) {
+          abuseFlags.push('SPEND_SPIKE')
+        }
+      }
+    }
+
     const reservation = await reserveBudget(
       request.subjectId,
       request.model,
@@ -49,6 +90,18 @@ export class EnforcementEngine {
         reason: reservation.reason,
         estimatedTokens,
         estimatedCostCents,
+        abuseFlags,
+      }
+    }
+
+    // Also block if we have abuse flags and blockOnViolation is set
+    if (abuseFlags.length > 0 && config.blockOnViolation) {
+      return {
+        allowed: false,
+        reason: `Abuse detected: ${abuseFlags.join(', ')}`,
+        estimatedTokens,
+        estimatedCostCents,
+        abuseFlags,
       }
     }
 
@@ -59,6 +112,7 @@ export class EnforcementEngine {
       minuteTokens: reservation.minuteTokens ?? null,
       rollingAvgTokens: reservation.rollingAvgTokens ?? null,
       velocitySpike: reservation.velocitySpike ?? false,
+      abuseFlags,
     }
   }
 
@@ -79,5 +133,8 @@ export class EnforcementEngine {
     if (this.estimator.recordActual) {
       this.estimator.recordActual(request.prompt, response.totalTokens, request.model)
     }
+
+    // Always record daily spend to maintain accurate EMA
+    await recordDailySpend(request.subjectId, request.model, actualCostCents)
   }
 }
