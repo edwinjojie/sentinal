@@ -237,3 +237,27 @@ end
 
 return newCount
 `
+
+export const RECORD_TOKEN_DENSITY = `
+local emaKey = KEYS[1]
+local ratio = tonumber(ARGV[1])
+local multiplier = tonumber(ARGV[2])
+local alpha = 0.2
+
+local currentEmaStr = redis.call("GET", emaKey)
+local currentEma = currentEmaStr and tonumber(currentEmaStr) or 0
+local isAnomaly = 0
+
+if currentEma > 0 then
+    if ratio > (currentEma * multiplier) then
+        isAnomaly = 1
+    end
+    
+    local newEma = (alpha * ratio) + ((1 - alpha) * currentEma)
+    redis.call("SET", emaKey, string.format("%.4f", newEma))
+else
+    redis.call("SET", emaKey, string.format("%.4f", ratio))
+end
+
+return isAnomaly
+`

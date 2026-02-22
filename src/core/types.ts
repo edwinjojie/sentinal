@@ -20,6 +20,7 @@ export interface AbuseScoreWeights {
   promptRepetition?: number
   spendSpike?: number
   budgetExhaustion?: number
+  tokenDensityAnomaly?: number
 }
 
 export interface AbuseScoreThresholds {
@@ -33,6 +34,7 @@ export interface AbuseDetectionConfig {
   promptSimilarityWindowMs?: number
   promptSimilarityThreshold?: number
   spendSpikeMultiplier?: number
+  tokenDensityMultiplier?: number
   scoreWeights?: AbuseScoreWeights
   scoreThresholds?: AbuseScoreThresholds
 }

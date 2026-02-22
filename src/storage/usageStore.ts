@@ -9,6 +9,7 @@ import {
   RECORD_DAILY_SPEND,
   INCREMENT_ABUSE_SCORE,
   INCREMENT_EXHAUSTION_COUNT,
+  RECORD_TOKEN_DENSITY,
 } from './scripts'
 
 const MINUTE_TTL_SECONDS = 60
@@ -345,4 +346,28 @@ export async function incrementExhaustionCount(
   )
 
   return newCount as number
+}
+
+export async function recordTokenDensity(
+  subjectId: string,
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  multiplier: number,
+) {
+  const emaKey = `sentinal:${model}:${subjectId}:token_density_ema`
+
+  // Prevent division by zero, though inputTokens should typically be > 0
+  const safeInputTokens = Math.max(1, inputTokens)
+  const ratio = outputTokens / safeInputTokens
+
+  const isAnomaly = await redis.eval(
+    RECORD_TOKEN_DENSITY,
+    1,
+    emaKey,
+    ratio,
+    multiplier
+  )
+
+  return isAnomaly === 1
 }

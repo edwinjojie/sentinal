@@ -82,6 +82,7 @@ export class SentinalGuard {
       await this.engine.commit(
         request,
         response,
+        this.config,
         reservedTokens,
         reservedCostCents,
       )

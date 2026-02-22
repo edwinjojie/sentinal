@@ -7,6 +7,7 @@ import {
   recordDailySpend,
   incrementAbuseScore,
   incrementExhaustionCount,
+  recordTokenDensity,
 } from '../storage/usageStore'
 import { hashPrompt } from '../utils/promptHash'
 import { calculateCost, costToCents } from './costCalculator'
@@ -183,6 +184,7 @@ export class EnforcementEngine {
   async commit(
     request: LLMRequest,
     response: LLMResponse,
+    config: GuardConfig,
     estimatedTokens: number,
     estimatedCostCents: number,
   ): Promise<void> {
@@ -200,5 +202,27 @@ export class EnforcementEngine {
 
     // Always record daily spend to maintain accurate EMA
     await recordDailySpend(request.subjectId, request.model, actualCostCents)
+
+    // Token Density Anomaly Detection
+    const configWeight = config.abuseDetection?.scoreWeights?.tokenDensityAnomaly
+    const multiplier = config.abuseDetection?.tokenDensityMultiplier
+
+    if (configWeight && multiplier) {
+      // Estimate input tokens to calculate ratio
+      const inputTokens = this.estimator.estimate(request.prompt, request.model)
+      const outputTokens = Math.max(0, response.totalTokens - inputTokens)
+
+      const isAnomaly = await recordTokenDensity(
+        request.subjectId,
+        request.model,
+        inputTokens,
+        outputTokens,
+        multiplier
+      )
+
+      if (isAnomaly) {
+        await incrementAbuseScore(request.subjectId, request.model, configWeight)
+      }
+    }
   }
 }
