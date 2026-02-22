@@ -4,6 +4,7 @@ import {
   RESERVE_SLIDING_WINDOW,
   RESERVE_UNIFIED,
   CHECK_PROMPT_SIMILARITY,
+  ADD_PROMPT_SIGNATURE,
   CHECK_DAILY_SPEND_SPIKE,
   RECORD_DAILY_SPEND,
   INCREMENT_ABUSE_SCORE,
@@ -199,27 +200,68 @@ export async function reserveBudget(
   }
 }
 
+import { calculateJaccardSimilarity } from '../utils/promptHash'
+
 export async function checkPromptSimilarity(
   subjectId: string,
   model: string,
-  promptHash: string,
+  promptSignature: number[],
   windowMs: number,
   threshold: number,
 ) {
   const key = `sentinal:${model}:${subjectId}:prompt_hashes`
   const now = Date.now()
 
-  const result = await redis.eval(
+  // 1. Get all recent signatures in the window
+  const results = await redis.eval(
     CHECK_PROMPT_SIMILARITY,
     1,
     key,
-    promptHash,
     now,
     windowMs,
-    threshold,
+  ) as string[]
+
+  let isSimilar = false
+  let matchCount = 0
+
+  if (results && results.length > 0) {
+    for (const sigStr of results) {
+      try {
+        const sig = JSON.parse(sigStr) as number[]
+        const similarity = calculateJaccardSimilarity(promptSignature, sig)
+
+        // Jaccard similarity threshold for "same intent" is typically 0.8
+        // We'll use 0.8 as a hardcoded similarity threshold for now, 
+        // the 'threshold' parameter in the config was originally for count, 
+        // but let's adapt it to mean "how many similar prompts to consider abuse"
+        if (similarity >= 0.8) {
+          matchCount++
+          if (matchCount >= threshold) {
+            isSimilar = true
+            break
+          }
+        }
+      } catch (e) {
+        // Ignore invalid stored signatures
+      }
+    }
+  }
+
+  // 2. Add the current signature
+  const nonce = Math.random().toString(36).substring(7)
+  const signatureJSON = JSON.stringify(promptSignature)
+
+  await redis.eval(
+    ADD_PROMPT_SIGNATURE,
+    1,
+    key,
+    signatureJSON,
+    now,
+    windowMs,
+    nonce
   )
 
-  return result === 1
+  return isSimilar
 }
 
 export async function checkDailySpendSpike(

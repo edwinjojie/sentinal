@@ -1,12 +1,14 @@
-export const INCREMENT_WITH_TTL = `
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.INCREMENT_EXHAUSTION_COUNT = exports.INCREMENT_ABUSE_SCORE = exports.RECORD_DAILY_SPEND = exports.CHECK_DAILY_SPEND_SPIKE = exports.CHECK_PROMPT_SIMILARITY = exports.RESERVE_UNIFIED = exports.RESERVE_SLIDING_WINDOW = exports.RESERVE_BUDGET = exports.INCREMENT_WITH_TTL = void 0;
+exports.INCREMENT_WITH_TTL = `
 local current = redis.call("INCRBY", KEYS[1], ARGV[1])
 if tonumber(current) == tonumber(ARGV[1]) then
   redis.call("EXPIRE", KEYS[1], ARGV[2])
 end
 return current
-`
-
-export const RESERVE_BUDGET = `
+`;
+exports.RESERVE_BUDGET = `
 local key = KEYS[1]
 local requested = tonumber(ARGV[1])
 local ttl = ARGV[2]
@@ -27,9 +29,8 @@ end
 
 local new = redis.call("DECRBY", key, requested)
 return new
-`
-
-export const RESERVE_SLIDING_WINDOW = `
+`;
+exports.RESERVE_SLIDING_WINDOW = `
 local key = KEYS[1]
 local requested = tonumber(ARGV[1])
 local now = tonumber(ARGV[2])
@@ -62,9 +63,8 @@ redis.call("ZADD", key, now, member)
 redis.call("EXPIRE", key, window)
 
 return limit - (current_usage + requested)
-`
-
-export const RESERVE_UNIFIED = `
+`;
+exports.RESERVE_UNIFIED = `
 local minuteKey = KEYS[1]
 local dailyKey = KEYS[2]
 
@@ -123,47 +123,39 @@ redis.call("EXPIRE", minuteKey, minuteWindow)
 local minuteRemaining = minuteLimit - (currentMinuteUsage + tokens)
 
 return {1, minuteRemaining, newDaily, currentMinuteUsage + tokens}
-`
-
-export const CHECK_PROMPT_SIMILARITY = `
+`;
+exports.CHECK_PROMPT_SIMILARITY = `
 local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local window = tonumber(ARGV[2])
+local hash = ARGV[1]
+local now = tonumber(ARGV[2])
+local window = tonumber(ARGV[3])
+local threshold = tonumber(ARGV[4])
 
 -- 1. Remove old entries
 local clearBefore = now - window
 redis.call("ZREMRANGEBYSCORE", key, "-inf", clearBefore)
 
--- 2. Return all remaining signatures
--- Each member is stored as "signatureJSON:nonce"
-local range = redis.call("ZRANGE", key, 0, -1)
-local signatures = {}
+-- 2. Add current hash
+local member = hash .. ":" .. tostring(now)
+redis.call("ZADD", key, now, member)
+redis.call("EXPIRE", key, window)
 
+-- 3. Count occurrences of this specific hash in the current window
+local count = 0
+local range = redis.call("ZRANGE", key, 0, -1)
 for _, item in ipairs(range) do
-    -- Extract the signatureJSON part
-    local sig = string.match(item, "^(.*):.*$")
-    if sig then
-        table.insert(signatures, sig)
+    if string.match(item, "^" .. hash .. ":") then
+        count = count + 1
     end
 end
 
-return signatures
-`
+if count > threshold then
+    return 1
+end
 
-export const ADD_PROMPT_SIGNATURE = `
-local key = KEYS[1]
-local signatureJSON = ARGV[1]
-local now = tonumber(ARGV[2])
-local window = tonumber(ARGV[3])
-local nonce = ARGV[4]
-
-local member = signatureJSON .. ":" .. nonce
-redis.call("ZADD", key, now, member)
-redis.call("EXPIRE", key, window)
-return 1
-`
-
-export const CHECK_DAILY_SPEND_SPIKE = `
+return 0
+`;
+exports.CHECK_DAILY_SPEND_SPIKE = `
 local todayKey = KEYS[1]
 local emaKey = KEYS[2]
 
@@ -177,9 +169,8 @@ if emaCost > 0 and (todayCost + estimatedCostCents) > multiplier * emaCost then
     return 1
 end
 return 0
-`
-
-export const RECORD_DAILY_SPEND = `
+`;
+exports.RECORD_DAILY_SPEND = `
 local todayKey = KEYS[1]
 local emaKey = KEYS[2]
 local lastActiveDateKey = KEYS[3]
@@ -208,9 +199,8 @@ todayCost = todayCost + costCents
 redis.call("SET", todayKey, todayCost, "EX", 172800)
 
 return 1
-`
-
-export const INCREMENT_ABUSE_SCORE = `
+`;
+exports.INCREMENT_ABUSE_SCORE = `
 local key = KEYS[1]
 local delta = tonumber(ARGV[1])
 local ttl = tonumber(ARGV[2])
@@ -220,9 +210,8 @@ local newScore = current + delta
 
 redis.call("SET", key, newScore, "EX", ttl)
 return newScore
-`
-
-export const INCREMENT_EXHAUSTION_COUNT = `
+`;
+exports.INCREMENT_EXHAUSTION_COUNT = `
 local key = KEYS[1]
 local ttl = tonumber(ARGV[1])
 
@@ -236,4 +225,4 @@ else
 end
 
 return newCount
-`
+`;

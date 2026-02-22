@@ -1,0 +1,128 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.EnforcementEngine = void 0;
+const usageStore_1 = require("../storage/usageStore");
+const promptHash_1 = require("../utils/promptHash");
+const costCalculator_1 = require("./costCalculator");
+class EnforcementEngine {
+    constructor(options) {
+        this.estimator = options.estimator;
+    }
+    async reserve(request, config) {
+        const estimatedTokens = this.estimator.estimate(request.prompt, request.model);
+        const estimatedCost = (0, costCalculator_1.calculateCost)(estimatedTokens);
+        const estimatedCostCents = (0, costCalculator_1.costToCents)(estimatedCost);
+        const minuteLimit = config.minuteTokenLimit;
+        const dailyLimitCents = (0, costCalculator_1.costToCents)(config.dailyCostLimitUSD);
+        const abuseFlags = [];
+        if (config.abuseDetection) {
+            if (config.abuseDetection.promptSimilarityWindowMs &&
+                config.abuseDetection.promptSimilarityThreshold) {
+                const hash = (0, promptHash_1.hashPrompt)(request.prompt);
+                const isSimilar = await (0, usageStore_1.checkPromptSimilarity)(request.subjectId, request.model, hash, config.abuseDetection.promptSimilarityWindowMs, config.abuseDetection.promptSimilarityThreshold);
+                if (isSimilar) {
+                    abuseFlags.push('PROMPT_ENUMERATION');
+                }
+            }
+            if (config.abuseDetection.spendSpikeMultiplier) {
+                const isSpike = await (0, usageStore_1.checkDailySpendSpike)(request.subjectId, request.model, estimatedCostCents, config.abuseDetection.spendSpikeMultiplier);
+                if (isSpike) {
+                    abuseFlags.push('SPEND_SPIKE');
+                }
+            }
+        }
+        const reservation = await (0, usageStore_1.reserveBudget)(request.subjectId, request.model, estimatedTokens, minuteLimit, estimatedCostCents, dailyLimitCents);
+        if (reservation.velocitySpike) {
+            abuseFlags.push('VELOCITY_SPIKE');
+        }
+        // Check for near budget exhaustion (< 10% remaining)
+        if (reservation.remainingTokens !== undefined &&
+            reservation.remainingTokens !== null &&
+            reservation.remainingTokens < minuteLimit * 0.1) {
+            const exhaustionCount = await (0, usageStore_1.incrementExhaustionCount)(request.subjectId, request.model);
+            const triggerCount = config.abuseDetection?.scoreThresholds ?
+                config.abuseDetection.scoreThresholds.exhaustionTriggerCount || 3 : 3;
+            if (exhaustionCount >= triggerCount) {
+                abuseFlags.push('BUDGET_EXHAUSTION');
+            }
+        }
+        let currentAbuseScore = 0;
+        let softThrottled = false;
+        if (config.abuseDetection?.scoreWeights && abuseFlags.length > 0) {
+            let scoreDelta = 0;
+            const weights = config.abuseDetection.scoreWeights;
+            if (abuseFlags.includes('PROMPT_ENUMERATION'))
+                scoreDelta += weights.promptRepetition || 0;
+            if (abuseFlags.includes('SPEND_SPIKE'))
+                scoreDelta += weights.spendSpike || 0;
+            if (abuseFlags.includes('VELOCITY_SPIKE'))
+                scoreDelta += weights.velocitySpike || 0;
+            if (abuseFlags.includes('BUDGET_EXHAUSTION'))
+                scoreDelta += weights.budgetExhaustion || 0;
+            if (scoreDelta > 0) {
+                currentAbuseScore = await (0, usageStore_1.incrementAbuseScore)(request.subjectId, request.model, scoreDelta);
+            }
+        }
+        const { scoreThresholds } = config.abuseDetection || {};
+        // 1. Hard block if it exceeds the hardBlock threshold
+        if (scoreThresholds && currentAbuseScore >= scoreThresholds.hardBlock) {
+            return {
+                allowed: false,
+                reason: `Abuse score ${currentAbuseScore} exceeds hard block threshold`,
+                estimatedTokens,
+                estimatedCostCents,
+                abuseFlags,
+                abuseScore: currentAbuseScore,
+            };
+        }
+        // 2. Original reservation block
+        if (!reservation.allowed) {
+            return {
+                allowed: false,
+                reason: reservation.reason,
+                estimatedTokens,
+                estimatedCostCents,
+                abuseFlags,
+                abuseScore: currentAbuseScore,
+            };
+        }
+        // 3. Fallback to old blockOnViolation if thresholds aren't defined but flags exist
+        if (!scoreThresholds && abuseFlags.length > 0 && config.blockOnViolation) {
+            return {
+                allowed: false,
+                reason: `Abuse detected: ${abuseFlags.join(', ')}`,
+                estimatedTokens,
+                estimatedCostCents,
+                abuseFlags,
+            };
+        }
+        // 4. Soft throttle check
+        if (scoreThresholds && currentAbuseScore >= scoreThresholds.softThrottle) {
+            softThrottled = true;
+        }
+        return {
+            allowed: true,
+            estimatedTokens,
+            estimatedCostCents,
+            minuteTokens: reservation.minuteTokens ?? null,
+            rollingAvgTokens: reservation.rollingAvgTokens ?? null,
+            velocitySpike: reservation.velocitySpike ?? false,
+            abuseFlags,
+            abuseScore: currentAbuseScore,
+            softThrottled,
+        };
+    }
+    async commit(request, response, estimatedTokens, estimatedCostCents) {
+        const actualCost = (0, costCalculator_1.calculateCost)(response.totalTokens);
+        const actualCostCents = (0, costCalculator_1.costToCents)(actualCost);
+        const deltaTokens = estimatedTokens - response.totalTokens;
+        const deltaCostCents = estimatedCostCents - actualCostCents;
+        await (0, usageStore_1.adjustBudget)(request.subjectId, request.model, deltaTokens, deltaCostCents);
+        if (this.estimator.recordActual) {
+            this.estimator.recordActual(request.prompt, response.totalTokens, request.model);
+        }
+        // Always record daily spend to maintain accurate EMA
+        await (0, usageStore_1.recordDailySpend)(request.subjectId, request.model, actualCostCents);
+    }
+}
+exports.EnforcementEngine = EnforcementEngine;
