@@ -10,6 +10,7 @@ import {
   INCREMENT_ABUSE_SCORE,
   INCREMENT_EXHAUSTION_COUNT,
   RECORD_TOKEN_DENSITY,
+  ADD_GLOBAL_PROMPT_SIGNATURE,
 } from './scripts'
 
 const MINUTE_TTL_SECONDS = 60
@@ -370,4 +371,61 @@ export async function recordTokenDensity(
   )
 
   return isAnomaly === 1
+}
+export async function checkGlobalPromptSimilarity(
+  model: string,
+  currentSubjectId: string,
+  promptSignature: number[],
+  windowMs: number,
+  thresholdCount: number,
+) {
+  const key = `sentinal:global:${model}:prompt_hashes`
+  const now = Date.now()
+  const nonce = Math.random().toString(36).substring(7)
+  const signatureJSON = JSON.stringify(promptSignature)
+
+  // 1. Add current signature and return all valid signatures in window
+  const results = await redis.eval(
+    ADD_GLOBAL_PROMPT_SIGNATURE,
+    1,
+    key,
+    signatureJSON,
+    currentSubjectId,
+    now,
+    windowMs,
+    nonce
+  ) as string[]
+
+  const matchedSubjects = new Set<string>()
+
+  if (results && results.length > 0) {
+    for (const item of results) {
+      if (!item.includes('|')) continue
+
+      const parts = item.split('|')
+      if (parts.length < 2) continue
+
+      const storedSigStr = parts[0]
+      const storedSubjectId = parts[1]
+
+      // Don't count the current subject against themselves for *global* correlation
+      if (storedSubjectId === currentSubjectId) continue
+
+      try {
+        const storedSig = JSON.parse(storedSigStr) as number[]
+        const similarity = calculateJaccardSimilarity(promptSignature, storedSig)
+
+        if (similarity >= 0.8) {
+          matchedSubjects.add(storedSubjectId)
+          if (matchedSubjects.size >= thresholdCount) {
+            return true
+          }
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+  }
+
+  return false
 }

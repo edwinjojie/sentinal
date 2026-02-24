@@ -21,6 +21,7 @@ export interface AbuseScoreWeights {
   spendSpike?: number
   budgetExhaustion?: number
   tokenDensityAnomaly?: number
+  crossSubjectCorrelation?: number
 }
 
 export interface AbuseScoreThresholds {
@@ -35,6 +36,8 @@ export interface AbuseDetectionConfig {
   promptSimilarityThreshold?: number
   spendSpikeMultiplier?: number
   tokenDensityMultiplier?: number
+  crossSubjectWindowMs?: number
+  crossSubjectThreshold?: number
   scoreWeights?: AbuseScoreWeights
   scoreThresholds?: AbuseScoreThresholds
 }

@@ -261,3 +261,37 @@ end
 
 return isAnomaly
 `
+
+export const ADD_GLOBAL_PROMPT_SIGNATURE = `
+local key = KEYS[1]
+local signatureJSON = ARGV[1]
+local subjectId = ARGV[2]
+local now = tonumber(ARGV[3])
+local window = tonumber(ARGV[4])
+local nonce = ARGV[5]
+
+local member = signatureJSON .. "|" .. subjectId .. "|" .. nonce
+redis.call("ZADD", key, now, member)
+redis.call("EXPIRE", key, window)
+
+-- Clean up old entries
+local clearBefore = now - window
+redis.call("ZREMRANGEBYSCORE", key, "-inf", clearBefore)
+
+-- Return all remaining signatures
+local range = redis.call("ZRANGE", key, 0, -1)
+local signatures = {}
+
+for _, item in ipairs(range) do
+    local sigParts = {}
+    for part in string.gmatch(item, "([^|]+)") do
+        table.insert(sigParts, part)
+    end
+    
+    if #sigParts >= 2 then
+        table.insert(signatures, sigParts[1] .. "|" .. sigParts[2]) -- signatureJSON|subjectId
+    end
+end
+
+return signatures
+`

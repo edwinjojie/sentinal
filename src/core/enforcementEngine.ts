@@ -8,6 +8,7 @@ import {
   incrementAbuseScore,
   incrementExhaustionCount,
   recordTokenDensity,
+  checkGlobalPromptSimilarity,
 } from '../storage/usageStore'
 import { hashPrompt } from '../utils/promptHash'
 import { calculateCost, costToCents } from './costCalculator'
@@ -65,6 +66,24 @@ export class EnforcementEngine {
         if (isSimilar) {
           abuseFlags.push('PROMPT_ENUMERATION')
         }
+
+        // Add Cross-Subject Correlation Check here since it reuses the hash
+        if (
+          config.abuseDetection.crossSubjectWindowMs &&
+          config.abuseDetection.crossSubjectThreshold
+        ) {
+          const isGlobalFarm = await checkGlobalPromptSimilarity(
+            request.model,
+            request.subjectId,
+            hash,
+            config.abuseDetection.crossSubjectWindowMs,
+            config.abuseDetection.crossSubjectThreshold
+          )
+
+          if (isGlobalFarm) {
+            abuseFlags.push('FARM_BEHAVIOR')
+          }
+        }
       }
 
       if (config.abuseDetection.spendSpikeMultiplier) {
@@ -120,6 +139,7 @@ export class EnforcementEngine {
       if (abuseFlags.includes('SPEND_SPIKE')) scoreDelta += weights.spendSpike || 0
       if (abuseFlags.includes('VELOCITY_SPIKE')) scoreDelta += weights.velocitySpike || 0
       if (abuseFlags.includes('BUDGET_EXHAUSTION')) scoreDelta += weights.budgetExhaustion || 0
+      if (abuseFlags.includes('FARM_BEHAVIOR')) scoreDelta += weights.crossSubjectCorrelation || 0
 
       if (scoreDelta > 0) {
         currentAbuseScore = await incrementAbuseScore(request.subjectId, request.model, scoreDelta)
