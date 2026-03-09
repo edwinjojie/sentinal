@@ -73,13 +73,64 @@ app.post('/api/test', async (req, res) => {
 });
 
 app.get('/api/stats', async (req, res) => {
-    const keys = await redis.keys('sentinal:*');
-    const stats: any = {};
-    for (const key of keys) {
-        const val = await redis.get(key);
-        stats[key] = val;
+    try {
+        const keys = await redis.keys('sentinal:*');
+        const stats: any = {
+            global: {
+                totalKeys: keys.length,
+                activeSubjects: new Set(),
+                totalRequests: 0, // Mock or derived if available
+            },
+            subjects: {} as Record<string, any>
+        };
+
+        for (const key of keys) {
+            const val = await redis.get(key);
+            const parts = key.split(':');
+
+            // sentinal:model:subjectId:type
+            if (parts.length >= 4) {
+                const model = parts[1];
+                const subjectId = parts[2];
+                const type = parts.slice(3).join(':');
+
+                stats.global.activeSubjects.add(subjectId);
+
+                if (!stats.subjects[subjectId]) {
+                    stats.subjects[subjectId] = { id: subjectId, models: {} };
+                }
+                if (!stats.subjects[subjectId].models[model]) {
+                    stats.subjects[subjectId].models[model] = {};
+                }
+
+                // Parse known types
+                if (type === 'abuse_score') stats.subjects[subjectId].models[model].abuseScore = parseInt(val || '0');
+                else if (type === 'rolling_avg') stats.subjects[subjectId].models[model].rollingAvg = parseInt(val || '0');
+                else if (type === 'daily_budget') stats.subjects[subjectId].models[model].dailySpend = parseInt(val || '0');
+                else if (type === 'minute') {
+                    // This is a sorted set in real usage, but let's check what redis.get returns or handle it
+                    // In usageStore.ts, minuteKey is a ZSET. redis.get(key) will fail.
+                    // However, server.ts uses redis.get(key). Let's fix this to be more robust.
+                    try {
+                        const typeInfo = await redis.type(key);
+                        if (typeInfo === 'zset') {
+                            stats.subjects[subjectId].models[model].minuteTokens = await redis.zcard(key);
+                        } else {
+                            stats.subjects[subjectId].models[model][type] = val;
+                        }
+                    } catch (e) { }
+                }
+                else {
+                    stats.subjects[subjectId].models[model][type] = val;
+                }
+            }
+        }
+
+        stats.global.activeSubjects = stats.global.activeSubjects.size;
+        res.json(stats);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
     }
-    res.json(stats);
 });
 
 app.post('/api/reset', async (req, res) => {

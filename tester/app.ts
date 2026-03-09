@@ -3,20 +3,18 @@ const API_BASE = 'http://localhost:3001/api';
 // Elements
 const cfgTokenLimit = document.getElementById('cfg-token-limit') as HTMLInputElement;
 const cfgCostLimit = document.getElementById('cfg-cost-limit') as HTMLInputElement;
-const cfgSimWindow = document.getElementById('cfg-sim-window') as HTMLInputElement;
 const cfgSimThreshold = document.getElementById('cfg-sim-threshold') as HTMLInputElement;
-const cfgSpikeMulti = document.getElementById('cfg-spike-multi') as HTMLInputElement;
-const cfgBlockViolation = document.getElementById('cfg-block-violation') as HTMLInputElement;
 const updateConfigBtn = document.getElementById('update-config-btn') as HTMLButtonElement;
 
 const subjectIdInput = document.getElementById('subject-id') as HTMLInputElement;
-const modelIdInput = document.getElementById('model-id') as HTMLInputElement;
 const promptInput = document.getElementById('prompt-input') as HTMLTextAreaElement;
 const sendRequestBtn = document.getElementById('send-request-btn') as HTMLButtonElement;
 const hugePromptBtn = document.getElementById('huge-prompt-btn') as HTMLButtonElement;
 
 const logsContainer = document.getElementById('logs-container') as HTMLDivElement;
-const statsDisplay = document.getElementById('stats-display') as HTMLPreElement;
+const subjectList = document.getElementById('subject-list') as HTMLDivElement;
+const statTotalKeys = document.getElementById('stat-total-keys') as HTMLSpanElement;
+const statActiveSubjects = document.getElementById('stat-active-subjects') as HTMLSpanElement;
 const refreshStatsBtn = document.getElementById('refresh-stats-btn') as HTMLButtonElement;
 const resetBtn = document.getElementById('reset-btn') as HTMLButtonElement;
 const statusText = document.getElementById('status-text') as HTMLSpanElement;
@@ -37,10 +35,12 @@ async function init() {
         setOnline(false);
     }
     refreshStats();
+    // Start polling stats every 3 seconds
+    setInterval(refreshStats, 3000);
 }
 
 function setOnline(online: boolean) {
-    statusText.innerText = online ? 'Online' : 'Offline';
+    statusText.innerText = online ? 'SYSTEM ACTIVE' : 'ENGINE OFFLINE';
     statusDot.className = online ? 'dot online' : 'dot';
 }
 
@@ -48,11 +48,8 @@ function updateConfigFields(config: any) {
     if (config.minuteTokenLimit) cfgTokenLimit.value = config.minuteTokenLimit;
     if (config.dailyCostLimitUSD) cfgCostLimit.value = config.dailyCostLimitUSD;
     if (config.abuseDetection) {
-        cfgSimWindow.value = config.abuseDetection.promptSimilarityWindowMs;
         cfgSimThreshold.value = config.abuseDetection.promptSimilarityThreshold;
-        cfgSpikeMulti.value = config.abuseDetection.spendSpikeMultiplier;
     }
-    cfgBlockViolation.checked = !!config.blockOnViolation;
 }
 
 // Actions
@@ -60,11 +57,8 @@ updateConfigBtn.addEventListener('click', async () => {
     const config = {
         minuteTokenLimit: parseInt(cfgTokenLimit.value),
         dailyCostLimitUSD: parseFloat(cfgCostLimit.value),
-        blockOnViolation: cfgBlockViolation.checked,
         abuseDetection: {
-            promptSimilarityWindowMs: parseInt(cfgSimWindow.value),
             promptSimilarityThreshold: parseInt(cfgSimThreshold.value),
-            spendSpikeMultiplier: parseFloat(cfgSpikeMulti.value),
         }
     };
 
@@ -75,50 +69,49 @@ updateConfigBtn.addEventListener('click', async () => {
             body: JSON.stringify(config)
         });
         if (res.ok) {
-            addLog('system', 'Configuration updated successfully');
+            addLog('system', 'Security policy synchronized');
         }
     } catch (e: any) {
-        addLog('error', `Failed to update config: ${e.message}`);
+        addLog('error', `Policy sync failed: ${e.message}`);
     }
 });
 
 sendRequestBtn.addEventListener('click', async () => {
     const subjectId = subjectIdInput.value;
-    const model = modelIdInput.value;
     const prompt = promptInput.value;
 
     if (!prompt) {
-        alert('Please enter a prompt');
+        alert('Prompt payload required');
         return;
     }
 
     sendRequestBtn.disabled = true;
-    sendRequestBtn.innerText = 'Sending...';
+    sendRequestBtn.innerText = 'Transmitting...';
 
     try {
         const res = await fetch(`${API_BASE}/test`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subjectId, model, prompt })
+            body: JSON.stringify({ subjectId, prompt })
         });
 
         const data = await res.json();
         if (res.ok) {
-            addLog('allowed', `Request allowed. Tokens used: ${data.response.totalTokens}`, data.response);
+            addLog('allowed', `Request authorized. ${data.response.totalTokens} tokens consumed.`, data.response);
         } else {
-            addLog('blocked', `Request blocked: ${data.reason}`, data.details);
+            addLog('blocked', `Request denied: ${data.reason}`, data.details);
         }
     } catch (e: any) {
-        addLog('error', `Request failed: ${e.message}`);
+        addLog('error', `Transmission failure: ${e.message}`);
     } finally {
         sendRequestBtn.disabled = false;
-        sendRequestBtn.innerText = 'Send Request';
+        sendRequestBtn.innerText = 'Fire Request';
         refreshStats();
     }
 });
 
 hugePromptBtn.addEventListener('click', () => {
-    promptInput.value = 'A'.repeat(50000); // Simulate a large input
+    promptInput.value = 'A'.repeat(50000);
 });
 
 refreshStatsBtn.addEventListener('click', refreshStats);
@@ -128,50 +121,106 @@ async function refreshStats() {
         const res = await fetch(`${API_BASE}/stats`);
         if (res.ok) {
             const stats = await res.json();
-            statsDisplay.innerText = JSON.stringify(stats, null, 2);
+            renderStats(stats);
+            setOnline(true);
         }
-    } catch (e) { }
+    } catch (e) {
+        setOnline(false);
+    }
+}
+
+function renderStats(stats: any) {
+    statTotalKeys.innerText = stats.global.totalKeys;
+    statActiveSubjects.innerText = stats.global.activeSubjects;
+
+    const subjects = stats.subjects;
+    if (Object.keys(subjects).length === 0) {
+        subjectList.innerHTML = '<div class="empty-state" style="padding: 2rem 0;">No subjects tracked.</div>';
+        return;
+    }
+
+    subjectList.innerHTML = '';
+    for (const sid in subjects) {
+        const subject = subjects[sid];
+        const models = subject.models;
+
+        for (const modelId in models) {
+            const m = models[modelId];
+            const score = m.abuseScore || 0;
+            const scorePercent = Math.min(100, score);
+            const scoreClass = score < 30 ? 'low' : score < 70 ? 'medium' : 'high';
+
+            const item = document.createElement('div');
+            item.className = 'subject-item';
+            item.innerHTML = `
+                <div class="subject-info">
+                    <span class="subject-id">${sid} <span style="opacity:0.5; font-size:0.7rem;">(${modelId})</span></span>
+                    <span class="tag">${m.minuteTokens || 0} req/min</span>
+                </div>
+                <div class="abuse-score-container">
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar ${scoreClass}" style="width: ${scorePercent}%"></div>
+                    </div>
+                    <div class="score-text">
+                        <span>Abuse Score</span>
+                        <span>${score}/100</span>
+                    </div>
+                </div>
+                <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    ${m.rollingAvg ? `<span class="tag">Avg: ${m.rollingAvg}t</span>` : ''}
+                    ${m.dailySpend ? `<span class="tag">Spend: $${(m.dailySpend / 100).toFixed(2)}</span>` : ''}
+                </div>
+            `;
+            subjectList.appendChild(item);
+        }
+    }
 }
 
 resetBtn.addEventListener('click', async () => {
-    if (confirm('Are you sure you want to reset all data in Redis?')) {
+    if (confirm('Erase all security metadata?')) {
         await fetch(`${API_BASE}/reset`, { method: 'POST' });
-        addLog('system', 'Redis store has been reset');
+        addLog('system', 'Redis state purged');
         refreshStats();
     }
 });
 
 function addLog(type: string, message: string, details: any = null) {
-    const container = logsContainer;
-    if (container.querySelector('.empty-state')) {
-        container.innerHTML = '';
+    if (logsContainer.querySelector('.empty-state')) {
+        logsContainer.innerHTML = '';
     }
 
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
 
-    const time = new Date().toLocaleTimeString();
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     let metaHtml = '';
     if (details) {
-        if (details.abuseFlags && details.abuseFlags.length > 0) {
-            metaHtml += `<div class="flags">${details.abuseFlags.map((f: string) => `<span class="flag">${f}</span>`).join('')}</div>`;
-        }
-        if (details.velocitySpike) {
-            metaHtml += `<div class="flags"><span class="flag">Velocity Spike</span></div>`;
+        const flags = [];
+        if (details.abuseFlags && details.abuseFlags.length > 0) flags.push(...details.abuseFlags);
+        if (details.velocitySpike) flags.push('VELOCITY_SPIKE');
+        if (details.softThrottled) flags.push('SOFT_THROTTLED');
+
+        if (flags.length > 0) {
+            metaHtml = `<div class="log-footer">${flags.map(f => `<span class="tag tag-warning">${f}</span>`).join('')}</div>`;
         }
     }
 
     entry.innerHTML = `
         <div class="log-header">
-            <span class="log-status">${type.toUpperCase()}</span>
+            <span class="log-status">${type}</span>
             <span class="log-time">${time}</span>
         </div>
         <div class="log-content">${message}</div>
         ${metaHtml}
     `;
 
-    container.insertBefore(entry, container.firstChild);
+    logsContainer.insertBefore(entry, logsContainer.firstChild);
+
+    // Keep only last 50 logs
+    if (logsContainer.children.length > 50) {
+        logsContainer.removeChild(logsContainer.lastChild!);
+    }
 }
 
 init();

@@ -1,103 +1,122 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sentinel Testing Suite</title>
+    <title>Sentinel | Guard Performance Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <div class="app-container">
         <header>
             <div class="logo">
-                <span class="logo-icon">🛡️</span>
-                <h1>Sentinel <span>Testing Suite</span></h1>
+                <h1>Sentinel <span>/ Engine</span></h1>
             </div>
             <div class="header-actions">
-                <button id="reset-btn" class="btn btn-secondary">Reset Store</button>
                 <div class="status-badge" id="backend-status">
-                    <span class="dot"></span> Backend: <span id="status-text">Checking...</span>
+                    <span class="dot online"></span> <span id="status-text">SYSTEM ACTIVE</span>
                 </div>
+                <button id="reset-btn" class="btn btn-secondary">Flush Store</button>
             </div>
         </header>
 
-        <main>
-            <section class="config-panel card">
-                <h2>Guard Configuration</h2>
-                <div class="config-grid">
-                    <div class="input-group">
-                        <label>Minute Token Limit</label>
-                        <input type="number" id="cfg-token-limit" value="1000">
+        <main class="dashboard-grid">
+            <!-- Left: Config & Simulation -->
+            <div class="sidebar">
+                <section class="card config-panel">
+                    <div class="card-header">
+                        <h2>Guard Configuration</h2>
                     </div>
-                    <div class="input-group">
-                        <label>Daily Cost Limit ($)</label>
-                        <input type="number" id="cfg-cost-limit" value="10">
+                    <div class="input-grid">
+                        <div class="input-group">
+                            <label>Rate Limit (Tokens/min)</label>
+                            <input type="number" id="cfg-token-limit" value="1000">
+                        </div>
+                        <div class="input-group">
+                            <label>Daily Budget ($)</label>
+                            <input type="number" id="cfg-cost-limit" value="10">
+                        </div>
+                        <div class="input-group">
+                            <label>Similarity Threshold</label>
+                            <input type="number" id="cfg-sim-threshold" value="3">
+                        </div>
                     </div>
-                    <div class="input-group">
-                        <label>Similarity Window (ms)</label>
-                        <input type="number" id="cfg-sim-window" value="60000">
-                    </div>
-                    <div class="input-group">
-                        <label>Similarity Threshold</label>
-                        <input type="number" id="cfg-sim-threshold" value="3">
-                    </div>
-                    <div class="input-group">
-                        <label>Spend Spike Multiplier</label>
-                        <input type="number" id="cfg-spike-multi" value="2.5" step="0.1">
-                    </div>
-                    <div class="input-group checkbox-group">
-                        <label>
-                            <input type="checkbox" id="cfg-block-violation" checked>
-                            Block on Violation
-                        </label>
-                    </div>
-                </div>
-                <button id="update-config-btn" class="btn btn-primary">Update Configuration</button>
-            </section>
-
-            <div class="main-grid">
-                <section class="simulation-panel card">
-                    <h2>Simulate Request</h2>
-                    <div class="input-group">
-                        <label>Subject ID</label>
-                        <input type="text" id="subject-id" value="test_user_1">
-                    </div>
-                    <div class="input-group">
-                        <label>Model</label>
-                        <input type="text" id="model-id" value="gpt-4o">
-                    </div>
-                    <div class="input-group">
-                        <label>Prompt</label>
-                        <textarea id="prompt-input" rows="5" placeholder="Enter your prompt here..."></textarea>
-                    </div>
-                    <div class="action-row">
-                        <button id="send-request-btn" class="btn btn-primary btn-large">Send Request</button>
-                        <button id="huge-prompt-btn" class="btn btn-outline">Fill Huge Prompt</button>
-                    </div>
+                    <button id="update-config-btn" class="btn btn-primary" style="width: 100%;">Apply Policy</button>
                 </section>
 
-                <section class="results-panel card">
-                    <h2>Live Logs</h2>
-                    <div id="logs-container" class="logs-container">
-                        <div class="empty-state">No requests yet. Send a simulation request to see results.</div>
+                <section class="card simulation-panel">
+                    <div class="card-header">
+                        <h2>Traffic Simulator</h2>
+                    </div>
+                    <div class="input-group">
+                        <label>Subject ID</label>
+                        <input type="text" id="subject-id" value="user_alpha">
+                    </div>
+                    <div class="input-group">
+                        <label>Payload</label>
+                        <textarea id="prompt-input" rows="4" placeholder="Simulate prompt input..."></textarea>
+                    </div>
+                    <div class="action-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <button id="send-request-btn" class="btn btn-primary">Fire Request</button>
+                        <button id="huge-prompt-btn" class="btn btn-secondary">Bulk Payload</button>
                     </div>
                 </section>
             </div>
 
-            <section class="stats-panel card">
-                <div class="section-header">
-                    <h2>Redis Metadata</h2>
-                    <button id="refresh-stats-btn" class="btn btn-small btn-secondary">Refresh</button>
+            <!-- Center: Live Logs -->
+            <section class="card logs-panel">
+                <div class="card-header">
+                    <h2>Protection Streams</h2>
+                    <span class="tag">REAL-TIME</span>
                 </div>
-                <div id="stats-container" class="stats-container">
-                    <pre id="stats-display" class="code-block">{}</pre>
+                <div id="logs-container" class="logs-scroll">
+                    <div class="empty-state">
+                        <i>🛡️</i>
+                        Monitoring active. Send a simulation request to begin streaming.
+                    </div>
                 </div>
             </section>
+
+            <!-- Right: Real-time Metrics -->
+            <div class="metrics-panel">
+                <section class="card">
+                    <div class="card-header">
+                        <h2>Global Context</h2>
+                    </div>
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <span class="label">Total Keys</span>
+                            <span class="value" id="stat-total-keys">0</span>
+                        </div>
+                        <div class="metric-card">
+                            <span class="label">Active Subjects</span>
+                            <span class="value" id="stat-active-subjects">0</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card" style="margin-top: 2rem;">
+                    <div class="card-header">
+                        <h2>Subject Breakdown</h2>
+                        <button id="refresh-stats-btn" class="btn btn-secondary"
+                            style="padding: 0.25rem 0.75rem; font-size: 0.7rem;">Sync</button>
+                    </div>
+                    <div id="subject-list" class="subject-list">
+                        <!-- Dynamic content -->
+                        <div class="empty-state" style="padding: 2rem 0;">No subjects tracked.</div>
+                    </div>
+                </section>
+            </div>
         </main>
     </div>
     <script type="module" src="app.ts"></script>
 </body>
+
 </html>
