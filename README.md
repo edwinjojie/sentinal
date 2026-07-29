@@ -10,21 +10,7 @@ Sentinal acts as an intelligent proxy/guard between your users and upstream LLM 
 
 Standard API rate limiters operate on simple request counts. However, LLMs are billed and constrained by tokens and cost, which are highly variable and unknown until after the model finishes generating a response.
 
-To prevent race conditions, budget overruns, and database-level lockups in distributed systems, Sentinal uses a **Pessimistic Reservation and Optimistic Commit** workflow:
-
-User Request       +-------------------+       LLM API Calls       +--------------------+
-------------->[1]  |                   |  =>[4]  |                    |
-|   SentinalGuard   |                           |  Upstream Provider |
-<-------------[6]  |                   |  <=[5]  |    (Ollama/OAI)    |
-LLM Response     +---------+---------+     Actual Token Usage    +--------------------+
-|
-[2] Read | [3] Reserve
-| [5a] Commit Delta
-v
-+-------------------+
-|    Redis Store    |
-| (Lua Scripting)   |
-+-------------------+
+To prevent race conditions, budget overruns, and database-level lockups in distributed systems, Sentinal uses a **Pessimistic Reservation and Optimistic Commit** workflow
 
 
 ### The Request Lifecycle
